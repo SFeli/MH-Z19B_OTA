@@ -2,10 +2,10 @@
   Include:
   ServerEvent(WiFiEvent_t event)
       Handler für WiFiEvent
-  String urlDecode(const String& text)    
+  String urlDecode(const String& text)
   mqttcallback(char* topic, byte* message, unsigned int length)
       Handler für MQTT-Callback - Empfang von MQTT-Meldungen
-  */
+*/
 #include <Arduino.h>
 
 void ServerEvent(WiFiEvent_t event)
@@ -87,19 +87,94 @@ void mqttcallback(char* topic, byte* message, unsigned int length) {
   // Serial.print(topic);
   String messageTemp;
   for (int i = 0; i < length; i++) {
-    Serial.print((char)message[i]);
+    //  Serial.print((char)message[i]);
     messageTemp += (char)message[i];
+    mqtt_msg[i] = (char)message[i];
   }
-  Serial.println();
+  // Serial.println();
 
   if (strcmp(topic, "/ESP32/7D80806A/upd") == 0) {
-    Serial.print("FHEM_MQTT received Topic 7D80806A ...");
+    //  Serial.print("FHEM_MQTT received Topic 7D80806A ...");
     preferences.begin("wifi", false);           // Note: Namespace name is limited to 15 chars
-    Serial.println("Writing OTA_Day - 1 into NVS");
+    //  Serial.println("Writing OTA_Day - 1 into NVS");
     preferences.putUInt("OTA", OTA_day - 1);
     delay(300);
     preferences.end();
     ESP.restart();
+  }
+  if (strcmp(topic, "/ESP32/7D80806A/cmd") == 0) {
+    //  Serial.print("FHEM_MQTT received Topic 7D80806A/cmd ...");
+    String tempmsg = "Command arrived: " + messageTemp;
+    FHEM_Client.publish(mqtt_topic, (char*) tempmsg.c_str());
+    doc.clear();
+    // delay(300);
+    if (messageTemp == "getCO2") {
+      int CO2 = myMHZ19.getCO2(false, false);  // Request CO2 (as ppm) limimted value, last measurement
+      //  delay(100);
+      MQTT_ATT["CO2_0_0"] = CO2;
+      CO2 = myMHZ19.getCO2(true, false);  // Request CO2 (as ppm) unlimimted value, last measurement
+      //  delay(100);
+      MQTT_ATT["CO2_1_0"] = CO2;
+      CO2 = myMHZ19.getCO2(true, true);   // Request CO2 (as ppm) unlimimted value, new request
+      MQTT_ATT["CO2"] = CO2;              // is the best value -> put it into graph
+      serializeJson(MQTT_ATT, mqtt_msg);
+      FHEM_Client.publish(mqtt_topic, mqtt_msg);
+    }
+    if (messageTemp ==  "getCO2Raw") {
+      int CO2 = myMHZ19.getCO2Raw(false);  // Request CO2 (as ppm) "raw" CO2 value of unknown units
+      MQTT_ATT["CO2_0"] = CO2;
+      CO2 = myMHZ19.getCO2(true);  // Request CO2 (as ppm) "raw" CO2 value of unknown units
+      MQTT_ATT["CO2_1"] = CO2;
+      serializeJson(MQTT_ATT, mqtt_msg);
+      FHEM_Client.publish(mqtt_topic, mqtt_msg);
+    }
+    if (messageTemp ==  "getRange") {
+      int CO2 = myMHZ19.getRange();       // reads range using command 153
+      MQTT_ATT["16.Range"] = CO2;         // update the Headerinformations 16.Range
+      serializeJson(MQTT_ATT, mqtt_msg);
+      FHEM_Client.publish(mqtt_topic, mqtt_msg);
+    }
+    if (messageTemp == "getAccuracy") {
+      int CO2 = myMHZ19.getAccuracy(false);  // Returns accuracy value if available
+      //  delay(100);
+      MQTT_ATT["Accuracy_0"] = CO2;
+      CO2 = myMHZ19.getAccuracy(true);  // Returns accuracy value if available
+      //  delay(100);
+      MQTT_ATT["Accuracy_1"] = CO2;
+      serializeJson(MQTT_ATT, mqtt_msg);
+      FHEM_Client.publish(mqtt_topic, mqtt_msg);
+    }
+    if (messageTemp == "ABC_off") {
+      myMHZ19.autoCalibration(false);  // 121 0x79 Turns ABC logic on or off (b[3] == 0xA0 - on, 0x00 - off)
+      delay(100);                      // set ABC off and check the value
+      int CO2 =  myMHZ19.getABC();     // 125 0x7D Returns ABC logic status (1 - enabled, 0 - disabled)
+      MQTT_ATT["15.AutoCal."] = CO2;
+      serializeJson(MQTT_ATT, mqtt_msg);
+      FHEM_Client.publish(mqtt_topic, mqtt_msg);
+    }
+    if (messageTemp == "ABC_on") {
+      myMHZ19.autoCalibration(true);  // 121 0x79 Turns ABC logic on or off (b[3] == 0xA0 - on, 0x00 - off)
+      delay(100);                     // set ABC on and check the value
+      int CO2 =  myMHZ19.getABC();    // 125 0x7D Returns ABC logic status (1 - enabled, 0 - disabled)
+      MQTT_ATT["15.AutoCal."] = CO2;
+      serializeJson(MQTT_ATT, mqtt_msg);
+      FHEM_Client.publish(mqtt_topic, mqtt_msg);
+    }
+    if (messageTemp == "Zero") {
+      myMHZ19.calibrateZero();        // 135 0x87 Calibrates "Zero" (Note: Zero refers to 400ppm for this sensor)
+      //  delay(100);
+    }
+    if (messageTemp == "Recover") {
+      myMHZ19.recoveryReset();        // 120  0 Recovery Reset Changes operation mode and performs MCU reset
+      //  delay(100);
+    }
+    if (messageTemp == "getABC") {
+      int CO2 =  myMHZ19.getABC();  // 125 0x7D Returns ABC logic status (1 - enabled, 0 - disabled)
+      MQTT_ATT["15.AutoCal."] = CO2;
+      serializeJson(MQTT_ATT, mqtt_msg);
+      FHEM_Client.publish(mqtt_topic, mqtt_msg);
+    }
+    doc.clear();
   }
 }
 
@@ -109,7 +184,8 @@ void fhemconnect() {
     String MQclientId = "Z19B_01";                   // client ID
     if (FHEM_Client.connect(MQclientId.c_str())) {   // connect now
       Serial.println("connected");
-      FHEM_Client.subscribe("/ESP32/7D80806A/upd");
+      FHEM_Client.subscribe("/ESP32/7D80806A/+");
+      //      FHEM_Client.subscribe("/ESP32/7D80806A/cmd");
     } else {
       Serial.print("failed, status code =");
       Serial.print(FHEM_Client.state());

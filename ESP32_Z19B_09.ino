@@ -43,15 +43,16 @@ WiFiClient espClient;           // create an instance of PubSubClient client loc
 PubSubClient FHEM_Client(espClient);
 MHZ19 myMHZ19;                  // Constructor for MH-Z19 class - Sensor
 HardwareSerial Z19_serial(1);   // Define Z19_serial as serial - input 1 for the sensor
+StaticJsonDocument<400> doc;
+JsonObject MQTT_ATT = doc.to<JsonObject>();
+
+
 
 #include "ESP32_Z19B_Include.h"      // All Includes
 
 #if MQTT_MAX_PACKET_SIZE < 256  // If the max message size is too small, throw an error at compile time. See PubSubClient.cpp line 359
 #error "MQTT_MAX_PACKET_SIZE is too small in libraries/PubSubClient/src/PubSubClient.h at line 359, increase it to 256"
 #endif
-
-StaticJsonDocument<400> doc;
-JsonObject MQTT_ATT = doc.to<JsonObject>();
 
 void setup()
 {
@@ -147,7 +148,7 @@ void setup()
 
   Z19_serial.begin(BAUDRATE, SERIAL_8N1, RX_PIN, TX_PIN);
   delay(500);
-  myMHZ19.begin(Z19_serial);       // Important, Pass your Stream reference
+  myMHZ19.begin(Z19_serial);            // Important, Pass your Stream reference
   delay(500);
 
   myMHZ19.autoCalibration(sens_autoCalibratation);
@@ -187,6 +188,7 @@ void loop() {
   {
     int CO2 = myMHZ19.getCO2(true, true);               // Request CO2 (as ppm) unlimimted value, new request
     delay(100);
+    doc.clear();
     MQTT_ATT["CO2"] = CO2;
 
     float Temp = myMHZ19.getTemperature(true, false);   // decimal value, new request (false = not new request
